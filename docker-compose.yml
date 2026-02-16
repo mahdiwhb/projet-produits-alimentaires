@@ -1,0 +1,12 @@
+version: "3.8"
+services:
+  mongo:
+    image: mongo:7
+    container_name: mongo_data_pipeline
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data_pipeline:/data/db
+
+volumes:
+  mongo_data_pipeline:

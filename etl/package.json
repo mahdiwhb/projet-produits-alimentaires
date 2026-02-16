@@ -1,0 +1,17 @@
+{
+  "name": "etl",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "commonjs",
+  "scripts": {
+    "test": "jest"
+  },
+  "dependencies": {
+    "mongodb": "^7.1.0"
+  },
+  "devDependencies": {
+    "better-sqlite3": "^12.6.2",
+    "jest": "^30.2.0"
+  }
+}
