@@ -1,774 +1,859 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import axios from "axios";
-import Papa from "papaparse";
 import { motion, AnimatePresence } from "framer-motion";
-import {
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from "recharts";
+import { ResponsiveContainer, PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, LineChart, Line } from "recharts";
 
-const API = "http://localhost:4000";
-const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#22c55e", "#06b6d4"];
-
-function getNutri(it) {
-  const v = it?.nutriscore ?? it?.nutriscore_grade ?? "";
-  return String(v).trim().toUpperCase();
-}
-
-function normCategory(cat) {
-  return String(cat || "")
-    .replace(/^en:/i, "")
-    .trim();
-}
-
-function downloadText(filename, text) {
-  const blob = new Blob([text], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function AnimatedNumber({ value, decimals = 0, suffix = "" }) {
-  const [n, setN] = useState(0);
-
-  useEffect(() => {
-    const from = n;
-    const to = Number(value || 0);
-    const duration = 500;
-    const start = performance.now();
-
-    let raf = 0;
-    const tick = (t) => {
-      const p = Math.min(1, (t - start) / duration);
-      const eased = 1 - Math.pow(1 - p, 3);
-      const cur = from + (to - from) * eased;
-      setN(cur);
-      if (p < 1) raf = requestAnimationFrame(tick);
-    };
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  return (
-    <span>
-      {Number.isFinite(n) ? n.toFixed(decimals) : (0).toFixed(decimals)}
-      {suffix}
-    </span>
-  );
-}
+const API = import.meta.env.VITE_API_URL || "http://localhost:4000";
+const BG = "#080A08";
+const TEXT = "#F5EAD4";
+const ACCENT = "#C8873A";
+const BORDER = "rgba(200,135,58,0.25)";
+const COLORS = ["#6BAF7E", "#E8A050", "#C8873A", "#B85C38", "#8B3A1E"];
 
 export default function App() {
-  const [items, setItems] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [selected, setSelected] = useState(null);
-
+  const [categories, setCategories] = useState([]);
+  const [selectedCat, setSelectedCat] = useState(null);
+  const [selectedSubcat, setSelectedSubcat] = useState(null);
+  const [subcategories, setSubcategories] = useState([]);
+  const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState("");
-
-  // Pagination
+  const [darkMode, setDarkMode] = useState(true);
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(20);
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [stats, setStats] = useState(null);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [navActive, setNavActive] = useState("overview");
 
-  // Filters (4+)
-  const [q, setQ] = useState("");
-  const [nutriFilter, setNutriFilter] = useState("ALL"); // ALL | A | B | C | D | E
-  const [categoryFilter, setCategoryFilter] = useState("ALL"); // ALL | category
-  const [minScore, setMinScore] = useState(""); // number input (string)
-
-  // Sort
-  const [sort, setSort] = useState("score_desc"); // score_desc | score_asc | name_asc | name_desc | sugar_asc | sugar_desc
-  const [theme, setTheme] = useState("dark"); // dark | light
-
-  // Fetch (items paginés + stats globales)
+  // Load categories on mount
   useEffect(() => {
-    let cancelled = false;
-
-    async function run() {
+    async function loadCats() {
       try {
-        setLoading(true);
-        setErr("");
-
-        const [itemsRes, statsRes] = await Promise.all([
-          axios.get(`${API}/items`, { params: { page, pageSize } }),
-          axios.get(`${API}/stats`),
-        ]);
-
-        if (cancelled) return;
-
-        setItems(itemsRes.data.items || []);
+        const res = await axios.get(`${API}/categories`);
+        setCategories(res.data);
+        if (res.data.length > 0) {
+          setSelectedCat(res.data[0]);
+        }
+        const statsRes = await axios.get(`${API}/stats`);
         setStats(statsRes.data);
       } catch (e) {
-        if (cancelled) return;
-        setErr(e?.message || "Erreur de chargement");
+        console.error("Failed to load categories:", e);
       } finally {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       }
     }
+    loadCats();
+  }, []);
 
-    run();
-    return () => {
-      cancelled = true;
-    };
-  }, [page]);
+  // Load subcategories when category changes
+  useEffect(() => {
+    if (!selectedCat) return;
+    async function loadSubcats() {
+      try {
+        const res = await axios.get(`${API}/categories/${selectedCat.id}/subcategories`);
+        setSubcategories(res.data);
+        if (res.data.length > 0) {
+          // Select the first subcategory with products, or first if none have products
+          const withProducts = res.data.find(sub => sub.product_count > 0);
+          setSelectedSubcat(withProducts || res.data[0]);
+          setPage(1);
+        }
+      } catch (e) {
+        console.error("Failed to load subcategories:", e);
+      }
+    }
+    loadSubcats();
+  }, [selectedCat]);
 
-  // Theme tokens
-  const t = useMemo(() => {
-    const dark = {
-      bg: "linear-gradient(135deg,#0b1220,#0f172a,#111c33)",
-      panel: "rgba(255,255,255,0.06)",
-      panel2: "rgba(255,255,255,0.04)",
-      border: "rgba(255,255,255,0.12)",
-      text: "#e2e8f0",
-      muted: "rgba(226,232,240,0.70)",
-      grid: "rgba(255,255,255,0.06)",
-      tooltipBg: "rgba(15,23,42,0.95)",
-    };
-    const light = {
-      bg: "linear-gradient(135deg,#f5f7fb,#eef2ff,#f8fafc)",
-      panel: "rgba(255,255,255,0.85)",
-      panel2: "rgba(255,255,255,0.72)",
-      border: "rgba(15,23,42,0.10)",
-      text: "#0f172a",
-      muted: "rgba(15,23,42,0.60)",
-      grid: "rgba(15,23,42,0.08)",
-      tooltipBg: "rgba(255,255,255,0.95)",
-    };
-    return theme === "dark" ? dark : light;
-  }, [theme]);
+  // Load products when subcategory changes
+  useEffect(() => {
+    if (!selectedSubcat) return;
+    async function loadProds() {
+      try {
+        const res = await axios.get(`${API}/subcategories/${selectedSubcat.id}/products`, {
+          params: { page, pageSize },
+        });
+        setProducts(res.data.items || []);
+        setTotalProducts(res.data.total || 0);
+      } catch (e) {
+        console.error("Failed to load products:", e);
+      }
+    }
+    loadProds();
+  }, [selectedSubcat, page, pageSize]);
 
-  const glassCard = useMemo(
-    () => ({
-      background: t.panel,
-      border: `1px solid ${t.border}`,
-      backdropFilter: "blur(12px)",
-      WebkitBackdropFilter: "blur(12px)",
-      borderRadius: 16,
-      boxShadow: theme === "dark" ? "0 20px 60px rgba(0,0,0,0.35)" : "0 14px 40px rgba(15,23,42,0.10)",
-    }),
-    [t, theme]
-  );
-
-  const total = stats?.total ?? 0;
-  const averages = stats?.averages ?? {};
-  const avgScore = Number(averages.avg_score ?? 0);
-  const avgSugars = Number(averages.avg_sugars ?? 0);
-  const avgKcal = Number(averages.avg_kcal ?? 0);
+  const totalPages = Math.ceil(totalProducts / pageSize);
+  const bgColor = darkMode ? BG : "#F5E6D3";
+  const textColor = darkMode ? TEXT : "#3D2817";
+  const cardBg = darkMode ? "#0D110D" : "#E8DCC8";
 
   const nutriData = useMemo(() => {
     const raw = stats?.nutriscoreBreakdown ?? [];
-    return raw.map((x) => ({ name: x.nutriscore, value: x.count }));
+    return raw.length > 0 ? raw.map((x) => ({ name: x.nutriscore, value: x.count })) : [
+      { name: "A", value: 0 },
+      { name: "B", value: 0 },
+      { name: "C", value: 0 },
+      { name: "D", value: 0 },
+      { name: "E", value: 0 },
+    ];
   }, [stats]);
 
-  const topCategories = useMemo(() => {
-    const raw = stats?.topCategories ?? [];
-    return raw.slice(0, 6).map((x) => ({
-      name: normCategory(x.category).slice(0, 20),
+  const topSubcats = useMemo(() => {
+    const raw = stats?.topSubcategories ?? [];
+    return raw.length > 0 ? raw.slice(0, 8).map((x) => ({
+      name: (x.subcategory || "Other").slice(0, 15),
       value: x.count,
-    }));
+    })) : Array(8).fill(0).map((_, i) => ({ name: `Categ ${i+1}`, value: 0 }));
   }, [stats]);
 
-  // ✅ Options catégorie (mix items page + topCategories stats)
-  const categoryOptions = useMemo(() => {
-    const set = new Set();
-    for (const it of items) {
-      const c = normCategory(it.category);
-      if (c) set.add(c);
-    }
-    for (const c of stats?.topCategories ?? []) {
-      const cc = normCategory(c.category);
-      if (cc) set.add(cc);
-    }
-    return ["ALL", ...Array.from(set).sort((a, b) => a.localeCompare(b))];
-  }, [items, stats]);
+  const sugarData = useMemo(() => {
+    return products
+      .filter(it => it.sugars_100g && it.sugars_100g > 0)
+      .sort((a, b) => b.sugars_100g - a.sugars_100g)
+      .slice(0, 12)
+      .map(it => ({ 
+        name: (it.product_name || "").substring(0, 15), 
+        value: parseFloat(it.sugars_100g.toFixed(1))
+      }));
+  }, [products]);
 
-  // Filtering + sorting (client-side)
-  const viewItems = useMemo(() => {
-    let out = items;
+  const kcalData = useMemo(() => {
+    return products
+      .filter(it => it.energy_kcal_100g && it.energy_kcal_100g > 0)
+      .sort((a, b) => b.energy_kcal_100g - a.energy_kcal_100g)
+      .slice(0, 12)
+      .map(it => ({ 
+        name: (it.product_name || "").substring(0, 15), 
+        value: parseFloat(it.energy_kcal_100g.toFixed(1))
+      }));
+  }, [products]);
 
-    const s = q.trim().toLowerCase();
-    if (s) {
-      out = out.filter((it) => {
-        const name = (it.product_name || "").toLowerCase();
-        const brand = (it.brand || "").toLowerCase();
-        const cat = normCategory(it.category).toLowerCase();
-        return name.includes(s) || brand.includes(s) || cat.includes(s);
-      });
-    }
-
-    if (nutriFilter !== "ALL") {
-      out = out.filter((it) => getNutri(it) === nutriFilter);
-    }
-
-    if (categoryFilter !== "ALL") {
-      out = out.filter((it) => normCategory(it.category) === categoryFilter);
-    }
-
-    const ms = minScore === "" ? null : Number(minScore);
-    if (ms !== null && !Number.isNaN(ms)) {
-      out = out.filter((it) => {
-        const v = Number(it.healthy_score);
-        return Number.isFinite(v) ? v >= ms : false;
-      });
-    }
-
-    const safeScore = (x) => {
-      const v = Number(x?.healthy_score);
-      return Number.isFinite(v) ? v : -999999;
-    };
-    const safeSugar = (x) => {
-      const v = Number(x?.sugars_100g);
-      return Number.isFinite(v) ? v : 999999; // sucre manquant -> très haut pour sugar_asc
-    };
-    const safeName = (x) => (x?.product_name || "").toLowerCase();
-
-    out = [...out].sort((a, b) => {
-      if (sort === "score_desc") return safeScore(b) - safeScore(a);
-      if (sort === "score_asc") return safeScore(a) - safeScore(b);
-      if (sort === "name_asc") return safeName(a).localeCompare(safeName(b));
-      if (sort === "name_desc") return safeName(b).localeCompare(safeName(a));
-      if (sort === "sugar_asc") return safeSugar(a) - safeSugar(b);
-      if (sort === "sugar_desc") return safeSugar(b) - safeSugar(a);
-      return 0;
-    });
-
-    return out;
-  }, [items, q, nutriFilter, categoryFilter, minScore, sort]);
-
-  const chipStyle = (nutri) => {
-    const n = (nutri || "").toUpperCase();
-    const mapDark = {
-      A: "rgba(34,197,94,0.20)",
-      B: "rgba(16,185,129,0.20)",
-      C: "rgba(245,158,11,0.20)",
-      D: "rgba(249,115,22,0.20)",
-      E: "rgba(239,68,68,0.20)",
-    };
-    const mapLight = {
-      A: "rgba(34,197,94,0.18)",
-      B: "rgba(16,185,129,0.18)",
-      C: "rgba(245,158,11,0.18)",
-      D: "rgba(249,115,22,0.18)",
-      E: "rgba(239,68,68,0.18)",
-    };
-    const map = theme === "dark" ? mapDark : mapLight;
-    return {
-      display: "inline-flex",
-      alignItems: "center",
-      justifyContent: "center",
-      minWidth: 36,
-      height: 28,
-      padding: "0 10px",
-      borderRadius: 999,
-      background: map[n] || (theme === "dark" ? "rgba(148,163,184,0.18)" : "rgba(15,23,42,0.08)"),
-      border: `1px solid ${t.border}`,
-      fontWeight: 800,
-      letterSpacing: 0.5,
-      color: t.text,
-    };
-  };
-
-  function exportCSV() {
-    // export des items visibles (filtrés/triés) de la page courante
-    const rows = viewItems.map((it) => ({
-      id: it.id,
-      product_name: it.product_name,
-      brand: it.brand,
-      category: it.category,
-      nutriscore: it.nutriscore ?? it.nutriscore_grade,
-      healthy_score: it.healthy_score,
-      energy_kcal_100g: it.energy_kcal_100g,
-      sugars_100g: it.sugars_100g,
-      salt_100g: it.salt_100g,
-    }));
-
-    const csv = Papa.unparse(rows);
-    downloadText(`items_page_${page}.csv`, csv);
-  }
-
-  if (err) {
+  if (loading) {
     return (
-      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, color: t.text, background: t.bg }}>
-        <div style={{ ...glassCard, padding: 22, maxWidth: 720, width: "100%" }}>
-          <h2 style={{ marginTop: 0 }}>Erreur</h2>
-          <p style={{ opacity: 0.9 }}>{err}</p>
-          <p style={{ opacity: 0.7, fontSize: 13 }}>
-            Vérifie que l’API tourne sur <b>http://localhost:4000</b> et que <b>/stats</b> répond.
-          </p>
-        </div>
+      <div style={{ width: "100vw", height: "100vh", background: bgColor, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ color: textColor }}>Chargement...</div>
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: t.bg, color: t.text }}>
-      {/* Loader overlay */}
-      <AnimatePresence>
-        {loading && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+    <div style={{ display: "flex", width: "100vw", minHeight: "100vh", background: bgColor, color: textColor, fontFamily: "'Space Grotesk', sans-serif" }}>
+      {/* Sidebar */}
+      <aside style={{ width: 240, background: darkMode ? "#0A0D0A" : "#F0E6D2", borderRight: `1px solid ${BORDER}`, padding: "24px 16px", display: "flex", flexDirection: "column", gap: 16, position: "sticky", top: 0, height: "100vh", overflowY: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+          <h1 style={{ fontSize: 16, fontWeight: 800, margin: 0 }}>🍎 Food Analytics</h1>
+          <button onClick={() => setDarkMode(!darkMode)} style={{ background: ACCENT, color: BG, border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer", fontWeight: 600, fontSize: 12 }}>
+            {darkMode ? "☀️" : "🌙"}
+          </button>
+        </div>
+
+        <div style={{ fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase", color: darkMode ? "rgba(200,135,58,0.45)" : "rgba(200,135,58,0.55)", marginBottom: 12, paddingLeft: 4 }}>Pages</div>
+
+        {[
+          { icon: "📊", label: "Vue Globale", key: "overview" },
+          { icon: "📈", label: "Nutrition", key: "nutrition" },
+          { icon: "🔥", label: "Calories", key: "calories" },
+          { icon: "⚙️", label: "Paramètres", key: "settings" },
+        ].map((item) => (
+          <div
+            key={item.key}
+            onClick={() => setNavActive(item.key)}
             style={{
-              position: "fixed",
-              inset: 0,
-              display: "grid",
-              placeItems: "center",
-              background: theme === "dark" ? "rgba(0,0,0,0.35)" : "rgba(255,255,255,0.55)",
-              zIndex: 99,
+              padding: "10px 12px",
+              borderRadius: 8,
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              fontSize: 13,
+              fontWeight: 600,
+              color: navActive === item.key ? "#F2BC78" : (darkMode ? "#7A6F60" : "#8B7355"),
+              border: `1px solid ${navActive === item.key ? "rgba(200,135,58,0.35)" : "transparent"}`,
+              background: navActive === item.key ? "rgba(200,135,58,0.10)" : "transparent",
+              transition: "all 0.2s",
             }}
           >
-            <motion.div
-              initial={{ scale: 0.95 }}
-              animate={{ scale: 1 }}
-              style={{ ...glassCard, padding: 18, display: "flex", alignItems: "center", gap: 12 }}
-            >
-              <motion.div
-                animate={{ rotate: 360 }}
-                transition={{ repeat: Infinity, duration: 0.9, ease: "linear" }}
-                style={{
-                  width: 18,
-                  height: 18,
-                  borderRadius: 999,
-                  border: `3px solid ${t.border}`,
-                  borderTopColor: "#3b82f6",
-                }}
-              />
-              <div style={{ fontWeight: 800 }}>Chargement…</div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <span>{item.icon}</span>
+            {item.label}
+          </div>
+        ))}
 
-      <div style={{ display: "flex" }}>
-        {/* Sidebar */}
-        <aside
-          style={{
-            width: 270,
-            padding: 22,
-            position: "sticky",
-            top: 0,
-            height: "100vh",
-            borderRight: `1px solid ${theme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(15,23,42,0.08)"}`,
-            background: t.panel2,
-            backdropFilter: "blur(10px)",
-          }}
-        >
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
+        <div style={{ borderTop: `1px solid ${BORDER}`, paddingTop: 16, marginTop: 16 }}>
+          <div style={{ fontSize: 10, letterSpacing: "0.2em", textTransform: "uppercase", color: darkMode ? "rgba(200,135,58,0.45)" : "rgba(200,135,58,0.55)", marginBottom: 12, paddingLeft: 4 }}>Catégories</div>
+          {categories.map((cat) => (
+            <motion.div
+              key={cat.id}
+              whileHover={{ x: 4 }}
+              onClick={() => { setSelectedCat(cat); setNavActive("categories"); }}
               style={{
-                width: 36,
-                height: 36,
-                borderRadius: 12,
-                background: theme === "dark" ? "rgba(59,130,246,0.18)" : "rgba(59,130,246,0.12)",
-                border: `1px solid ${t.border}`,
-                display: "grid",
-                placeItems: "center",
-                fontWeight: 900,
+                padding: "10px 12px",
+                margin: "0 0 6px",
+                borderRadius: 6,
+                cursor: "pointer",
+                background: selectedCat?.id === cat.id ? ACCENT : "transparent",
+                color: selectedCat?.id === cat.id ? BG : textColor,
+                transition: "all 0.2s",
+                fontWeight: 600,
+                fontSize: 13,
               }}
             >
-              🍎
-            </div>
-            <div>
-              <div style={{ fontSize: 16, fontWeight: 900 }}>Food Analytics</div>
-              <div style={{ fontSize: 12, opacity: 0.7 }}>Dashboard</div>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 18, ...glassCard, padding: 16 }}>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Total produits</div>
-            <div style={{ fontSize: 28, fontWeight: 900, marginTop: 6 }}>
-              <AnimatedNumber value={total} decimals={0} />
-            </div>
-          </div>
-
-          <div style={{ marginTop: 12, ...glassCard, padding: 14 }}>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>Thème</div>
-            <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-              <button onClick={() => setTheme("dark")} style={btnStyle(t, theme === "dark")}>
-                🌙 Dark
-              </button>
-              <button onClick={() => setTheme("light")} style={btnStyle(t, theme === "light")}>
-                ☀️ Light
-              </button>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 14, fontSize: 12, opacity: 0.7 }}>
-            Tri/filtre = <b>sur la page</b> (10 items).
-            <div style={{ marginTop: 8, opacity: 0.85 }}>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 14, fontSize: 12, opacity: 0.7 }}>
-            API: <span style={{ opacity: 0.95 }}>{API}</span>
-          </div>
-        </aside>
-
-        {/* Main */}
-        <main style={{ flex: 1, padding: 26, maxWidth: 1200, margin: "0 auto" }}>
-          {/* Topbar */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 16, marginBottom: 14 }}>
-            <div>
-              <div style={{ fontSize: 28, fontWeight: 1000, letterSpacing: -0.6 }}>Food Dashboard</div>
-              <div style={{ opacity: 0.7, marginTop: 6, fontSize: 13 }}>Vue globale des produits • Recharts • API Express</div>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Rechercher produit, marque, catégorie…" style={inputStyle(t)} />
-              <button onClick={() => { setQ(""); setNutriFilter("ALL"); setCategoryFilter("ALL"); setMinScore(""); }} style={buttonBase(t)}>
-                Reset
-              </button>
-              <button onClick={exportCSV} style={{ ...buttonBase(t), borderColor: "rgba(59,130,246,0.35)" }}>
-                Export CSV
-              </button>
-            </div>
-          </div>
-
-          {/* Filters row */}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-            <div style={{ ...glassCard, padding: 12, display: "flex", gap: 10, alignItems: "center" }}>
-              <span style={{ fontSize: 12, opacity: 0.75 }}>Nutriscore</span>
-              <select value={nutriFilter} onChange={(e) => setNutriFilter(e.target.value)} style={selectStyle(t)}>
-                <option value="ALL">Tous</option>
-                <option value="A">A</option>
-                <option value="B">B</option>
-                <option value="C">C</option>
-                <option value="D">D</option>
-                <option value="E">E</option>
-              </select>
-            </div>
-
-            {/* ✅ Filtre catégorie */}
-            <div style={{ ...glassCard, padding: 12, display: "flex", gap: 10, alignItems: "center" }}>
-              <span style={{ fontSize: 12, opacity: 0.75 }}>Catégorie</span>
-              <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)} style={selectStyle(t)}>
-                {categoryOptions.map((c) => (
-                  <option key={c} value={c}>
-                    {c === "ALL" ? "Toutes" : c}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* ✅ Filtre score min */}
-            <div style={{ ...glassCard, padding: 12, display: "flex", gap: 10, alignItems: "center" }}>
-              <span style={{ fontSize: 12, opacity: 0.75 }}>Score min</span>
-              <input
-                value={minScore}
-                onChange={(e) => setMinScore(e.target.value)}
-                placeholder="ex: 0"
-                inputMode="numeric"
-                style={{ ...inputStyle(t), width: 140 }}
-              />
-            </div>
-
-            {/* Tri */}
-            <div style={{ ...glassCard, padding: 12, display: "flex", gap: 10, alignItems: "center" }}>
-              <span style={{ fontSize: 12, opacity: 0.75 }}>Tri</span>
-              <select value={sort} onChange={(e) => setSort(e.target.value)} style={selectStyle(t)}>
-                <option value="score_desc">Score (desc)</option>
-                <option value="score_asc">Score (asc)</option>
-                <option value="name_asc">Nom (A→Z)</option>
-                <option value="name_desc">Nom (Z→A)</option>
-                <option value="sugar_asc">Sucre (asc)</option>
-                <option value="sugar_desc">Sucre (desc)</option>
-              </select>
-            </div>
-          </div>
-
-          {/* KPI cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 12, marginBottom: 14 }}>
-            <KPI t={t} theme={theme} title="Produits" value={<AnimatedNumber value={total} />} accent="rgba(59,130,246,0.22)" />
-            <KPI t={t} theme={theme} title="Score moyen" value={<AnimatedNumber value={avgScore} decimals={2} />} accent="rgba(16,185,129,0.22)" />
-            <KPI t={t} theme={theme} title="Sucre moyen" value={<AnimatedNumber value={avgSugars} decimals={2} suffix=" g" />} accent="rgba(245,158,11,0.22)" />
-            <KPI t={t} theme={theme} title="Kcal moyen" value={<AnimatedNumber value={avgKcal} decimals={0} />} accent="rgba(139,92,246,0.22)" />
-          </div>
-
-          {/* Charts */}
-          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 12, marginBottom: 14 }}>
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35 }}
-              style={{ ...glassCard, padding: 16 }}
-            >
-              <div style={{ fontWeight: 900, marginBottom: 10 }}>Répartition Nutriscore</div>
-              <div style={{ height: 300 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={nutriData}
-                      dataKey="value"
-                      outerRadius={120}
-                      innerRadius={75}
-                      paddingAngle={3}
-                      isAnimationActive={true}
-                      animationDuration={900}
-                    >
-                      {nutriData.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip contentStyle={tooltipStyle(t)} labelStyle={{ color: t.text }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
+              <span style={{ marginRight: 8 }}>{cat.icon}</span>
+              {cat.name}
             </motion.div>
+          ))}
+        </div>
+      </aside>
 
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, delay: 0.05 }}
-              style={{ ...glassCard, padding: 16 }}
-            >
-              <div style={{ fontWeight: 900, marginBottom: 10 }}>Top Catégories</div>
-              <div style={{ height: 300 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={topCategories}>
-                    <CartesianGrid stroke={t.grid} vertical={false} />
-                    <XAxis dataKey="name" tick={{ fill: t.muted, fontSize: 12 }} />
-                    <YAxis tick={{ fill: t.muted, fontSize: 12 }} />
-                    <Tooltip contentStyle={tooltipStyle(t)} labelStyle={{ color: t.text }} />
-                    <Bar dataKey="value" fill="#10b981" radius={[10, 10, 0, 0]} isAnimationActive animationDuration={900} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </motion.div>
-          </div>
+      {/* Main Content */}
+      <main style={{ flex: 1, padding: 32, overflowY: "auto", maxHeight: "100vh" }}>
+        {navActive === "overview" && <PageOverview stats={stats} nutriData={nutriData} topSubcats={topSubcats} darkMode={darkMode} ACCENT={ACCENT} TEXT={TEXT} BORDER={BORDER} COLORS={COLORS} cardBg={cardBg} />}
 
-          {/* Table */}
-          <div style={{ ...glassCard, overflow: "hidden" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 14 }}>
-              <div>
-                <div style={{ fontWeight: 1000 }}>Produits</div>
-                <div style={{ fontSize: 12, opacity: 0.7 }}>
-                  Page {page} • {viewItems.length} résultats (sur {pageSize} items chargés)
-                </div>
-              </div>
+        {navActive === "categories" && (
+          <PageCategories
+            selectedCat={selectedCat}
+            selectedSubcat={selectedSubcat}
+            setSelectedSubcat={setSelectedSubcat}
+            subcategories={subcategories}
+            products={products}
+            totalPages={totalPages}
+            page={setPage}
+            pageSize={pageSize}
+            setPageSize={setPageSize}
+            totalProducts={totalProducts}
+            setSelectedProduct={setSelectedProduct}
+            darkMode={darkMode}
+            cardBg={cardBg}
+            BORDER={BORDER}
+            ACCENT={ACCENT}
+          />
+        )}
 
-              <div style={{ display: "flex", gap: 10 }}>
-                <button disabled={page <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))} style={buttonBase(t, page <= 1)}>
-                  ← Prev
-                </button>
-                <button onClick={() => setPage((p) => p + 1)} style={buttonBase(t)}>
-                  Next →
-                </button>
-              </div>
+        {navActive === "nutrition" && <PageNutrition sugarData={sugarData} products={products} darkMode={darkMode} cardBg={cardBg} BORDER={BORDER} />}
+
+        {navActive === "calories" && <PageCalories kcalData={kcalData} products={products} darkMode={darkMode} cardBg={cardBg} BORDER={BORDER} />}
+
+        {navActive === "settings" && <PageSettings darkMode={darkMode} setDarkMode={setDarkMode} stats={stats} />}
+
+        <AnimatePresence>
+          {selectedProduct && (
+            <ProductModal product={selectedProduct} onClose={() => setSelectedProduct(null)} darkMode={darkMode} BORDER={BORDER} />
+          )}
+        </AnimatePresence>
+      </main>
+    </div>
+  );
+}
+
+function PageOverview({ stats, nutriData, topSubcats, darkMode, ACCENT, TEXT, BORDER, COLORS, cardBg }) {
+  const avgNutrients = useMemo(() => [
+    { label: "Calories", value: Math.round(stats?.averages?.avg_kcal || 0), max: 500 },
+    { label: "Sucres", value: (stats?.averages?.avg_sugars || 0).toFixed(1), max: 25 },
+    { label: "Sel", value: (stats?.averages?.avg_salt || 0).toFixed(2), max: 2 },
+    { label: "Protéines", value: (stats?.averages?.avg_protein || 0).toFixed(1), max: 20 },
+  ], [stats]);
+
+  return (
+    <>
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 32, color: darkMode ? TEXT : "#3D2817", marginBottom: 4 }}>
+          🍎 Food Analytics Dashboard
+        </div>
+        <div style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: darkMode ? "#7A6F60" : "#8B7355" }}>
+          Analyse complète • Statistiques globales • Tendances
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 16, marginBottom: 24 }}>
+        <KPICard label="Total Produits" value={stats?.total} darkMode={darkMode} />
+        <KPICard label="Avg Calories" value={Math.round(stats?.averages?.avg_kcal || 0)} darkMode={darkMode} />
+        <KPICard label="Avg Sucres" value={(stats?.averages?.avg_sugars || 0).toFixed(1)} unit="g" darkMode={darkMode} />
+        <KPICard label="Avg Sel" value={(stats?.averages?.avg_salt || 0).toFixed(2)} unit="g" darkMode={darkMode} />
+        <KPICard label="Avg Score" value={Math.round(stats?.averages?.avg_score || 0)} darkMode={darkMode} />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 24 }}>
+          <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 17, color: darkMode ? TEXT : "#3D2817", marginBottom: 20 }}>Distribution Nutriscore</div>
+          <ResponsiveContainer width="100%" height={280}>
+            <PieChart>
+              <Pie data={nutriData} dataKey="value" outerRadius={90} innerRadius={60} paddingAngle={2} label={{ fill: darkMode ? TEXT : "#3D2817", fontSize: 12 }}>
+                {nutriData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+              </Pie>
+              <Tooltip contentStyle={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid ${BORDER}` }} />
+            </PieChart>
+          </ResponsiveContainer>
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.05 }} style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 24 }}>
+          <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 17, color: darkMode ? TEXT : "#3D2817", marginBottom: 20 }}>Top 8 Sous-Catégories</div>
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={topSubcats} layout="vertical">
+              <CartesianGrid stroke={darkMode ? "rgba(200,135,58,0.1)" : "rgba(0,0,0,0.1)"} />
+              <XAxis type="number" tick={{ fill: darkMode ? "#B8A890" : "#8B7355", fontSize: 10 }} />
+              <YAxis dataKey="name" type="category" tick={{ fill: darkMode ? "#B8A890" : "#8B7355", fontSize: 10 }} width={100} />
+              <Tooltip contentStyle={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid ${BORDER}` }} />
+              <Bar dataKey="value" fill="#6BAF7E" radius={[0, 8, 8, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </motion.div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16, marginBottom: 24 }}>
+        {avgNutrients.map((nutrient, i) => (
+          <motion.div key={i} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: i * 0.05 }} style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 20 }}>
+            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 12, textTransform: "uppercase", fontWeight: 600 }}>{nutrient.label}</div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: ACCENT, marginBottom: 12 }}>{nutrient.value}</div>
+            <div style={{ height: 6, background: darkMode ? "rgba(200,135,58,0.15)" : "rgba(200,135,58,0.1)", borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ height: "100%", background: ACCENT, width: `${Math.min(100, (nutrient.value / nutrient.max) * 100)}%`, transition: "width 0.5s" }} />
             </div>
+            <div style={{ fontSize: 10, opacity: 0.5, marginTop: 8 }}>Max: {nutrient.max}</div>
+          </motion.div>
+        ))}
+      </div>
 
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead style={{ background: t.panel2 }}>
-                <tr>
-                  <Th t={t}>Produit</Th>
-                  <Th t={t}>Marque</Th>
-                  <Th t={t}>Nutri</Th>
-                  <Th t={t}>Score</Th>
+      <div style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 14, padding: 24 }}>
+        <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 17, color: darkMode ? TEXT : "#3D2817", marginBottom: 20 }}>📊 Santé Globale des Produits</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+          <HealthStat label="Score 80+" value={stats?.total ? Math.round((stats?.healthDistribution?.["80+"] || 0) / stats?.total * 100) : 0} icon="🟢" />
+          <HealthStat label="Score 60-79" value={stats?.total ? Math.round((stats?.healthDistribution?.["60-79"] || 0) / stats?.total * 100) : 0} icon="🟡" />
+          <HealthStat label="Score <60" value={stats?.total ? Math.round((stats?.healthDistribution?.["<60"] || 0) / stats?.total * 100) : 0} icon="🔴" />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function PageCategories({ selectedCat, selectedSubcat, setSelectedSubcat, subcategories, products, totalPages, page, pageSize, setPageSize, totalProducts, setSelectedProduct, darkMode, cardBg, BORDER, ACCENT }) {
+  return (
+    <>
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 32, color: darkMode ? "#F5EAD4" : "#3D2817", marginBottom: 4 }}>
+          {selectedCat?.icon} {selectedCat?.name}
+        </div>
+        <div style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: darkMode ? "#7A6F60" : "#8B7355" }}>
+          {totalProducts} produits détectés
+        </div>
+      </div>
+
+      {subcategories.length > 0 && (
+        <div style={{ padding: "16px 20px", borderBottom: `1px solid ${BORDER}`, overflowX: "auto", marginBottom: 24, background: cardBg, borderRadius: 12 }}>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {subcategories.map((sub) => (
+              <motion.button
+                key={sub.id}
+                whileHover={{ scale: 1.05 }}
+                onClick={() => { setSelectedSubcat(sub); page(1); }}
+                style={{
+                  padding: "10px 16px",
+                  borderRadius: 8,
+                  border: selectedSubcat?.id === sub.id ? `2px solid ${ACCENT}` : `1px solid ${BORDER}`,
+                  background: selectedSubcat?.id === sub.id ? ACCENT : "transparent",
+                  color: selectedSubcat?.id === sub.id ? "#080A08" : (darkMode ? "#F5EAD4" : "#3D2817"),
+                  cursor: "pointer",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  transition: "all 0.2s",
+                }}
+              >
+                {sub.name} ({sub.product_count})
+              </motion.button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {products.length > 0 ? (
+        <>
+          <div style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 12, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: ACCENT, color: "#080A08" }}>
+                  <th style={{ padding: "12px", textAlign: "left", fontWeight: 600 }}>Produit</th>
+                  <th style={{ padding: "12px", textAlign: "center" }}>Marque</th>
+                  <th style={{ padding: "12px", textAlign: "center" }}>Code-Barre</th>
+                  <th style={{ padding: "12px", textAlign: "center" }}>Nutri</th>
+                  <th style={{ padding: "12px", textAlign: "center" }}>Kcal</th>
+                  <th style={{ padding: "12px", textAlign: "center" }}>Sucres</th>
+                  <th style={{ padding: "12px", textAlign: "center" }}>Sel</th>
                 </tr>
               </thead>
-
               <tbody>
-                {viewItems.map((item) => (
+                {products.map((prod) => (
                   <tr
-                    key={item.id}
-                    onClick={() => setSelected(item)}
-                    style={{
-                      borderTop: `1px solid ${theme === "dark" ? "rgba(255,255,255,0.06)" : "rgba(15,23,42,0.06)"}`,
-                      cursor: "pointer",
-                      transition: "background 0.15s ease",
-                    }}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = theme === "dark" ? "rgba(255,255,255,0.03)" : "rgba(15,23,42,0.03)")}
+                    key={prod.id}
+                    style={{ borderBottom: `1px solid ${BORDER}`, cursor: "pointer" }}
+                    onClick={() => setSelectedProduct(prod)}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = darkMode ? "rgba(200,135,58,0.08)" : "rgba(200,135,58,0.1)")}
                     onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                   >
-                    <Td>
-                      <div style={{ fontWeight: 900 }}>{item.product_name || "—"}</div>
-                      <div style={{ fontSize: 12, opacity: 0.65 }}>{normCategory(item.category)}</div>
-                    </Td>
-                    <Td>{item.brand || "—"}</Td>
-
-                    {/* ✅ FIX: le chip doit être dans un TD */}
-                    <Td>
-                      <span style={chipStyle(getNutri(item))}>{getNutri(item) || "—"}</span>
-                    </Td>
-
-                    <Td style={{ fontWeight: 900 }}>{item.healthy_score ?? "—"}</Td>
+                    <td style={{ padding: "12px" }}>{prod.product_name}</td>
+                    <td style={{ padding: "12px", textAlign: "center", fontSize: 12, opacity: 0.8 }}>{prod.brand}</td>
+                    <td style={{ padding: "12px", textAlign: "center", fontSize: 12, opacity: 0.8, fontFamily: "monospace" }}>{prod.barcode || "—"}</td>
+                    <td style={{ padding: "12px", textAlign: "center", fontWeight: 600, color: prod.nutriscore === "A" ? "#6BAF7E" : "#E8A050" }}>
+                      {prod.nutriscore}
+                    </td>
+                    <td style={{ padding: "12px", textAlign: "center" }}>{prod.energy_kcal_100g}</td>
+                    <td style={{ padding: "12px", textAlign: "center" }}>{prod.sugars_100g?.toFixed(1)}</td>
+                    <td style={{ padding: "12px", textAlign: "center" }}>{prod.salt_100g?.toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
 
-          {/* Modal */}
-          <AnimatePresence>
-            {selected && (
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                onClick={() => setSelected(null)}
-                style={{
-                  position: "fixed",
-                  inset: 0,
-                  background: "rgba(0,0,0,0.55)",
-                  display: "grid",
-                  placeItems: "center",
-                  padding: 18,
-                  zIndex: 90,
-                }}
-              >
-                <motion.div
-                  initial={{ scale: 0.98, y: 10 }}
-                  animate={{ scale: 1, y: 0 }}
-                  exit={{ scale: 0.98, y: 10 }}
-                  transition={{ duration: 0.2 }}
-                  onClick={(e) => e.stopPropagation()}
-                  style={{ ...glassCard, width: "min(760px, 96vw)", padding: 18 }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                    <div>
-                      <div style={{ fontSize: 18, fontWeight: 1000 }}>{selected.product_name}</div>
-                      <div style={{ opacity: 0.7, marginTop: 4 }}>
-                        {selected.brand || "—"} • {normCategory(selected.category)}
-                      </div>
-                    </div>
-                    <button onClick={() => setSelected(null)} style={buttonBase(t)}>
-                      Fermer ✕
-                    </button>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginTop: 14 }}>
-                    <MiniStat t={t} label="Nutriscore" value={(selected.nutriscore || selected.nutriscore_grade || "—").toUpperCase()} />
-                    <MiniStat t={t} label="Healthy score" value={selected.healthy_score ?? "—"} />
-                    <MiniStat t={t} label="Kcal / 100g" value={selected.energy_kcal_100g ?? "—"} />
-                    <MiniStat t={t} label="Sucres / 100g" value={selected.sugars_100g ?? "—"} />
-                    <MiniStat t={t} label="Sel / 100g" value={selected.salt_100g ?? "—"} />
-                    <MiniStat t={t} label="ID" value={selected.id ?? "—"} />
-                  </div>
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </main>
-      </div>
-    </div>
+          <div style={{ marginTop: 20, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ fontSize: 12, opacity: 0.7 }}>
+              Page 1 / {totalPages}
+            </div>
+            <select
+              value={pageSize}
+              onChange={(e) => setPageSize(Number(e.target.value))}
+              style={{
+                padding: "8px 12px",
+                borderRadius: 6,
+                border: `1px solid ${BORDER}`,
+                background: cardBg,
+                color: darkMode ? "#F5EAD4" : "#3D2817",
+                cursor: "pointer",
+              }}
+            >
+              <option>10</option>
+              <option>20</option>
+              <option>50</option>
+            </select>
+          </div>
+        </>
+      ) : (
+        <div style={{ height: 300, display: "flex", alignItems: "center", justifyContent: "center", opacity: 0.6 }}>
+          Aucun produit dans cette sous-catégorie
+        </div>
+      )}
+    </>
   );
 }
 
-function KPI({ t, theme, title, value, accent }) {
+function PageNutrition({ sugarData, products, darkMode, cardBg, BORDER }) {
+  const saltData = useMemo(() => {
+    return products
+      .filter(it => it.salt_100g && it.salt_100g > 0)
+      .sort((a, b) => b.salt_100g - a.salt_100g)
+      .slice(0, 12)
+      .map(it => ({ 
+        name: (it.product_name || "").substring(0, 15), 
+        value: parseFloat(it.salt_100g.toFixed(2))
+      }));
+  }, [products]);
+
+  const proteinData = useMemo(() => {
+    return products
+      .filter(it => it.protein_100g && it.protein_100g > 0)
+      .sort((a, b) => b.protein_100g - a.protein_100g)
+      .slice(0, 12)
+      .map(it => ({ 
+        name: (it.product_name || "").substring(0, 15), 
+        value: parseFloat(it.protein_100g.toFixed(1))
+      }));
+  }, [products]);
+
+  return (
+    <>
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 32, color: darkMode ? "#F5EAD4" : "#3D2817", marginBottom: 4 }}>
+          📊 Analyse Nutritionnelle Détaillée
+        </div>
+        <div style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: darkMode ? "#7A6F60" : "#8B7355" }}>
+          Sucres, sels, protéines et valeurs nutritionnelles complètes
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 24 }}>
+          <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 17, color: darkMode ? "#F5EAD4" : "#3D2817", marginBottom: 20 }}>
+            🍬 Top 12 Sucres (g/100g)
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={sugarData}>
+              <CartesianGrid stroke={darkMode ? "rgba(200,135,58,0.1)" : "rgba(0,0,0,0.1)"} />
+              <XAxis dataKey="name" tick={{ fill: darkMode ? "#B8A890" : "#8B7355", fontSize: 10 }} angle={-45} textAnchor="end" height={80} />
+              <YAxis tick={{ fill: darkMode ? "#B8A890" : "#8B7355" }} />
+              <Tooltip contentStyle={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid ${BORDER}` }} />
+              <Bar dataKey="value" fill="#E8A050" radius={[8, 8, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.05 }} style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 24 }}>
+          <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 17, color: darkMode ? "#F5EAD4" : "#3D2817", marginBottom: 20 }}>
+            🧂 Top 12 Sel (mg/100g)
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={saltData}>
+              <CartesianGrid stroke={darkMode ? "rgba(200,135,58,0.1)" : "rgba(0,0,0,0.1)"} />
+              <XAxis dataKey="name" tick={{ fill: darkMode ? "#B8A890" : "#8B7355", fontSize: 10 }} angle={-45} textAnchor="end" height={80} />
+              <YAxis tick={{ fill: darkMode ? "#B8A890" : "#8B7355" }} />
+              <Tooltip contentStyle={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid ${BORDER}` }} />
+              <Bar dataKey="value" fill="#F19157" radius={[8, 8, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </motion.div>
+      </div>
+
+      <div style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 24 }}>
+        <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 17, color: darkMode ? "#F5EAD4" : "#3D2817", marginBottom: 20 }}>
+          💪 Top 12 Protéines (g/100g)
+        </div>
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={proteinData}>
+            <CartesianGrid stroke={darkMode ? "rgba(200,135,58,0.1)" : "rgba(0,0,0,0.1)"} />
+            <XAxis dataKey="name" tick={{ fill: darkMode ? "#B8A890" : "#8B7355", fontSize: 10 }} angle={-45} textAnchor="end" height={80} />
+            <YAxis tick={{ fill: darkMode ? "#B8A890" : "#8B7355" }} />
+            <Tooltip contentStyle={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid ${BORDER}` }} />
+            <Line type="monotone" dataKey="value" stroke="#6BAF7E" strokeWidth={3} dot={{ fill: "#6BAF7E", r: 4 }} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </>
+  );
+}
+
+function PageCalories({ kcalData, products, darkMode, cardBg, BORDER }) {
+  const calorieDistribution = useMemo(() => {
+    const ranges = [
+      { name: "0-50 kcal", min: 0, max: 50, count: 0 },
+      { name: "50-100 kcal", min: 50, max: 100, count: 0 },
+      { name: "100-200 kcal", min: 100, max: 200, count: 0 },
+      { name: "200-300 kcal", min: 200, max: 300, count: 0 },
+      { name: "300+ kcal", min: 300, max: Infinity, count: 0 },
+    ];
+    
+    products.forEach(p => {
+      const val = p.energy_kcal_100g || 0;
+      const range = ranges.find(r => val >= r.min && val < r.max);
+      if (range) range.count++;
+    });
+    
+    return ranges;
+  }, [products]);
+
+  const topCalorieIntensive = useMemo(() => {
+    return products
+      .filter(it => it.energy_kcal_100g && it.energy_kcal_100g > 0)
+      .sort((a, b) => b.energy_kcal_100g - a.energy_kcal_100g)
+      .slice(0, 8)
+      .map(it => ({ 
+        name: (it.product_name || "").substring(0, 18), 
+        value: parseFloat(it.energy_kcal_100g.toFixed(1))
+      }));
+  }, [products]);
+
+  return (
+    <>
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 32, color: darkMode ? "#F5EAD4" : "#3D2817", marginBottom: 4 }}>
+          🔥 Analyse Énergétique Complète
+        </div>
+        <div style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: darkMode ? "#7A6F60" : "#8B7355" }}>
+          Calories, énergie et densité calorique
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 24 }}>
+          <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 17, color: darkMode ? "#F5EAD4" : "#3D2817", marginBottom: 20 }}>
+            Courbe Énergétique (12 plus caloriques)
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <LineChart data={kcalData}>
+              <CartesianGrid stroke={darkMode ? "rgba(200,135,58,0.1)" : "rgba(0,0,0,0.1)"} />
+              <XAxis dataKey="name" tick={{ fill: darkMode ? "#B8A890" : "#8B7355", fontSize: 10 }} angle={-45} textAnchor="end" height={80} />
+              <YAxis tick={{ fill: darkMode ? "#B8A890" : "#8B7355" }} />
+              <Tooltip contentStyle={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid ${BORDER}` }} />
+              <Line type="monotone" dataKey="value" stroke="#C8873A" strokeWidth={3} dot={{ fill: "#C8873A", r: 4 }} />
+            </LineChart>
+          </ResponsiveContainer>
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.05 }} style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 24 }}>
+          <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 17, color: darkMode ? "#F5EAD4" : "#3D2817", marginBottom: 20 }}>
+            Distribution Calorique
+          </div>
+          <ResponsiveContainer width="100%" height={300}>
+            <BarChart data={calorieDistribution}>
+              <CartesianGrid stroke={darkMode ? "rgba(200,135,58,0.1)" : "rgba(0,0,0,0.1)"} />
+              <XAxis dataKey="name" tick={{ fill: darkMode ? "#B8A890" : "#8B7355", fontSize: 10 }} angle={-45} textAnchor="end" height={80} />
+              <YAxis tick={{ fill: darkMode ? "#B8A890" : "#8B7355" }} />
+              <Tooltip contentStyle={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid ${BORDER}` }} />
+              <Bar dataKey="count" fill="#D94444" radius={[8, 8, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </motion.div>
+      </div>
+
+      <div style={{ background: cardBg, border: `1px solid ${BORDER}`, borderRadius: 12, padding: 24 }}>
+        <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 17, color: darkMode ? "#F5EAD4" : "#3D2817", marginBottom: 20 }}>
+          🥇 Top 8 Produits Caloriques
+        </div>
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart data={topCalorieIntensive} layout="vertical">
+            <CartesianGrid stroke={darkMode ? "rgba(200,135,58,0.1)" : "rgba(0,0,0,0.1)"} />
+            <XAxis type="number" tick={{ fill: darkMode ? "#B8A890" : "#8B7355", fontSize: 10 }} />
+            <YAxis dataKey="name" type="category" tick={{ fill: darkMode ? "#B8A890" : "#8B7355", fontSize: 10 }} width={120} />
+            <Tooltip contentStyle={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid ${BORDER}` }} />
+            <Bar dataKey="value" fill="#F19157" radius={[0, 8, 8, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </>
+  );
+}
+
+function PageSettings({ darkMode, setDarkMode, stats }) {
+  const nutrientsAvg = useMemo(() => [
+    { label: "Calories (kcal)", value: Math.round(stats?.averages?.avg_kcal || 0), icon: "🔥" },
+    { label: "Sucres (g)", value: (stats?.averages?.avg_sugars || 0).toFixed(1), icon: "🍬" },
+    { label: "Sel (g)", value: (stats?.averages?.avg_salt || 0).toFixed(2), icon: "🧂" },
+    { label: "Protéines (g)", value: (stats?.averages?.avg_protein || 0).toFixed(1), icon: "💪" },
+  ], [stats]);
+
+  const scoreBreakdown = useMemo(() => [
+    { label: "A (Excellent)", value: stats?.nutriscoreBreakdown?.[0]?.count || 0, color: "#6BAF7E" },
+    { label: "B (Bon)", value: stats?.nutriscoreBreakdown?.[1]?.count || 0, color: "#A8C66F" },
+    { label: "C (Moyen)", value: stats?.nutriscoreBreakdown?.[2]?.count || 0, color: "#F0B233" },
+    { label: "D (Mauvais)", value: stats?.nutriscoreBreakdown?.[3]?.count || 0, color: "#F19157" },
+    { label: "E (Très mauvais)", value: stats?.nutriscoreBreakdown?.[4]?.count || 0, color: "#D94444" },
+  ], [stats]);
+
+  return (
+    <>
+      <div style={{ marginBottom: 28 }}>
+        <div style={{ fontFamily: "'DM Serif Display', serif", fontSize: 32, color: darkMode ? "#F5EAD4" : "#3D2817", marginBottom: 4 }}>
+          ⚙️ Paramètres & Configuration
+        </div>
+        <div style={{ fontSize: 12, letterSpacing: "0.12em", textTransform: "uppercase", color: darkMode ? "#7A6F60" : "#8B7355" }}>
+          Apparence, statistiques et données détaillées
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 24 }}>
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35 }} style={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid rgba(200,135,58,0.25)`, borderRadius: 12, padding: 24 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 16, borderBottom: `1px solid rgba(200,135,58,0.25)`, marginBottom: 16 }}>
+            <div>
+              <div style={{ fontWeight: 600, marginBottom: 4, fontSize: 14 }}>Mode Sombre</div>
+              <div style={{ fontSize: 13, opacity: 0.7 }}>Basculer l'apparence de l'interface</div>
+            </div>
+            <button
+              onClick={() => setDarkMode(!darkMode)}
+              style={{
+                width: 56,
+                height: 32,
+                borderRadius: 999,
+                border: "none",
+                background: darkMode ? "#C8873A" : "#B8A890",
+                cursor: "pointer",
+                padding: "3px",
+              }}
+            >
+              <div style={{
+                width: 26,
+                height: 26,
+                borderRadius: "50%",
+                background: darkMode ? "#161A14" : "#F0E6D2",
+                transform: darkMode ? "translateX(0)" : "translateX(24px)",
+                transition: "transform 0.3s",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 13,
+              }}>
+                {darkMode ? "🌙" : "☀️"}
+              </div>
+            </button>
+          </div>
+
+          <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", marginBottom: 16 }}>Moyennes Nutritionnelles</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            {nutrientsAvg.map((nutrient, i) => (
+              <div key={i} style={{ background: darkMode ? "rgba(200,135,58,0.08)" : "rgba(200,135,58,0.1)", padding: 12, borderRadius: 8 }}>
+                <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4 }}>{nutrient.icon} {nutrient.label}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "#C8873A" }}>{nutrient.value}</div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, delay: 0.05 }} style={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid rgba(200,135,58,0.25)`, borderRadius: 12, padding: 24 }}>
+          <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", marginBottom: 16 }}>Distribution Nutriscore</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {scoreBreakdown.map((score, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 30, height: 30, borderRadius: 6, background: score.color, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: "#fff" }}>
+                  {score.label.charAt(0)}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 11, fontWeight: 600, marginBottom: 4 }}>{score.label}</div>
+                  <div style={{ height: 6, background: darkMode ? "rgba(200,135,58,0.15)" : "rgba(200,135,58,0.1)", borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ height: "100%", background: score.color, width: `${Math.min(100, (score.value / (stats?.total || 1)) * 100)}%` }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, fontWeight: 700, minWidth: 30, textAlign: "right" }}>{score.value}</div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+      </div>
+
+      <div style={{ background: darkMode ? "#0D110D" : "#E8DCC8", border: `1px solid rgba(200,135,58,0.25)`, borderRadius: 12, padding: 24 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, textTransform: "uppercase", marginBottom: 16 }}>📊 Données Globales</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 12 }}>
+          <DataStat label="Total Produits" value={stats?.total} icon="📦" />
+          <DataStat label="Catégories" value={stats?.categoryCount || 12} icon="📁" />
+          <DataStat label="Sous-cat." value={stats?.subcategoryCount || 61} icon="📂" />
+          <DataStat label="Score Moy." value={Math.round(stats?.averages?.avg_score || 0)} icon="⭐" />
+          <DataStat label="Kcal Moy." value={Math.round(stats?.averages?.avg_kcal || 0)} icon="🔥" />
+          <DataStat label="Sucres Moy." value={(stats?.averages?.avg_sugars || 0).toFixed(1)} icon="🍬" />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function KPICard({ label, value, unit, darkMode }) {
   return (
     <motion.div
-      whileHover={{ scale: 1.02 }}
-      transition={{ duration: 0.15 }}
+      whileHover={{ scale: 1.02, y: -4 }}
       style={{
-        padding: 14,
-        borderRadius: 16,
-        background: t.panel,
-        border: `1px solid ${t.border}`,
-        boxShadow: theme === "dark" ? "0 16px 45px rgba(0,0,0,0.30)" : "0 12px 34px rgba(15,23,42,0.10)",
+        background: darkMode ? "#161A14" : "#F0E6D2",
+        border: `1px solid rgba(200,135,58,0.28)`,
+        borderRadius: 12,
+        padding: 20,
+        cursor: "pointer",
         position: "relative",
         overflow: "hidden",
       }}
     >
-      <div
-        style={{
-          position: "absolute",
-          inset: -80,
-          background: `radial-gradient(circle at 20% 20%, ${accent}, transparent 55%)`,
-          pointerEvents: "none",
-        }}
-      />
+      <div style={{ position: "absolute", top: 0, right: 0, width: 60, height: 60, background: "radial-gradient(circle, rgba(200,135,58,0.08), transparent 70%)", borderRadius: "50%" }} />
       <div style={{ position: "relative" }}>
-        <div style={{ fontSize: 12, opacity: 0.7 }}>{title}</div>
-        <div style={{ marginTop: 8, fontSize: 26, fontWeight: 1000 }}>{value}</div>
+        <div style={{ fontSize: 10, letterSpacing: "0.15em", textTransform: "uppercase", color: darkMode ? "#7A6F60" : "#8B7355", marginBottom: 8 }}>
+          {label}
+        </div>
+        <div style={{ fontSize: 28, fontWeight: 600, color: darkMode ? "#F5EAD4" : "#3D2817" }}>
+          {value} {unit && <span style={{ fontSize: 14 }}>{unit}</span>}
+        </div>
       </div>
     </motion.div>
   );
 }
 
-function MiniStat({ t, label, value }) {
+function StatBox({ label, value }) {
   return (
-    <div style={{ padding: 12, borderRadius: 14, background: t.panel2, border: `1px solid ${t.border}` }}>
-      <div style={{ fontSize: 12, opacity: 0.7 }}>{label}</div>
-      <div style={{ marginTop: 6, fontSize: 16, fontWeight: 1000 }}>{value}</div>
+    <div style={{ textAlign: "center", padding: 12, background: "rgba(200,135,58,0.08)", borderRadius: 8 }}>
+      <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "'JetBrains Mono', monospace" }}>{value}</div>
     </div>
   );
 }
 
-function Th({ t, children }) {
+function HealthStat({ label, value, icon }) {
   return (
-    <th style={{ textAlign: "left", padding: "12px 14px", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.6, opacity: 0.75, color: t.text }}>
-      {children}
-    </th>
+    <div style={{ textAlign: "center", padding: 16, background: "rgba(200,135,58,0.08)", borderRadius: 8 }}>
+      <div style={{ fontSize: 24, marginBottom: 8 }}>{icon}</div>
+      <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 6, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ fontSize: 24, fontWeight: 700, color: "#C8873A" }}>{value}%</div>
+    </div>
   );
 }
 
-function Td({ children }) {
-  return <td style={{ padding: "12px 14px", verticalAlign: "top" }}>{children}</td>;
+function DataStat({ label, value, icon }) {
+  return (
+    <div style={{ textAlign: "center", padding: 12, background: "rgba(200,135,58,0.08)", borderRadius: 8 }}>
+      <div style={{ fontSize: 18, marginBottom: 6 }}>{icon}</div>
+      <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 6, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, color: "#C8873A" }}>{value}</div>
+    </div>
+  );
 }
 
-function tooltipStyle(t) {
-  return {
-    background: t.tooltipBg,
-    border: `1px solid ${t.border}`,
-    borderRadius: 12,
-    color: t.text,
-  };
+function ProductModal({ product, onClose, darkMode, BORDER }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.5)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        zIndex: 999,
+      }}
+    >
+      <motion.div
+        initial={{ scale: 0.9, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        exit={{ scale: 0.9, opacity: 0 }}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: darkMode ? "#0D110D" : "#E8DCC8",
+          border: `1px solid ${BORDER}`,
+          borderRadius: 16,
+          padding: 32,
+          maxWidth: 500,
+          color: darkMode ? "#F5EAD4" : "#3D2817",
+        }}
+      >
+        <h2 style={{ fontSize: 20, fontWeight: 700, marginBottom: 16, marginTop: 0 }}>{product.product_name}</h2>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4, textTransform: "uppercase" }}>Marque</div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>{product.brand}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4, textTransform: "uppercase" }}>Nutriscore</div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>{product.nutriscore}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4, textTransform: "uppercase" }}>Code-Barre</div>
+            <div style={{ fontSize: 14, fontWeight: 600, fontFamily: "monospace" }}>{product.barcode || "—"}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4, textTransform: "uppercase" }}>Calories</div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>{product.energy_kcal_100g}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4, textTransform: "uppercase" }}>Sucres</div>
+            <div style={{ fontSize: 14, fontWeight: 600 }}>{product.sugars_100g?.toFixed(1)}</div>
+          </div>
+        </div>
+
+        <button
+          onClick={onClose}
+          style={{
+            width: "100%",
+            padding: "12px",
+            borderRadius: 8,
+            border: "none",
+            background: "#C8873A",
+            color: "#080A08",
+            fontWeight: 600,
+            cursor: "pointer",
+          }}
+        >
+          Fermer
+        </button>
+      </motion.div>
+    </motion.div>
+  );
 }
 
-function inputStyle(t) {
-  return {
-    width: 320,
-    padding: "10px 12px",
-    borderRadius: 12,
-    outline: "none",
-    border: `1px solid ${t.border}`,
-    background: t.panel2,
-    color: t.text,
-  };
-}
-
-function selectStyle(t) {
-  return {
-    padding: "8px 10px",
-    borderRadius: 12,
-    border: `1px solid ${t.border}`,
-    background: t.panel2,
-    color: t.text,
-    outline: "none",
-  };
-}
-
-function buttonBase(t, disabled = false) {
-  return {
-    padding: "10px 12px",
-    borderRadius: 12,
-    border: `1px solid ${t.border}`,
-    background: disabled ? t.panel2 : t.panel,
-    color: t.text,
-    cursor: disabled ? "not-allowed" : "pointer",
-    opacity: disabled ? 0.55 : 1,
-  };
-}
-
-function btnStyle(t, active) {
-  return {
-    padding: "10px 12px",
-    borderRadius: 12,
-    border: `1px solid ${active ? "rgba(59,130,246,0.45)" : t.border}`,
-    background: active ? "rgba(59,130,246,0.14)" : t.panel,
-    color: t.text,
-    cursor: "pointer",
-    fontWeight: 900,
-  };
+function Stat({ label, value }) {
+  return (
+    <div>
+      <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 4, textTransform: "uppercase" }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 600 }}>{value}</div>
+    </div>
+  );
 }

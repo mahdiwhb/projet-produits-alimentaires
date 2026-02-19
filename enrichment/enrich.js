@@ -27,7 +27,42 @@ function computeHealthyScore(nutri, sugars, salt) {
   return score;
 }
 
-(async () => {
+function buildEnrichedDoc(rawDoc) {
+  const rawId = rawDoc._id;
+  const p = rawDoc.payload || {};
+
+  const product_name = p.product_name || p.generic_name || "Unknown";
+  const brand = (p.brands || "").split(",")[0]?.trim() || "Unknown";
+  const category = (p.categories_tags && p.categories_tags[0]) || (p.categories || "Unknown");
+  const nutriscore = p.nutriscore_grade ? String(p.nutriscore_grade).toUpperCase() : null;
+  const image_url = p.image_front_url || p.image_url || null;
+
+  const nutriments = p.nutriments || {};
+  const energy_kcal_100g = toNumber(nutriments["energy-kcal_100g"] ?? nutriments["energy-kcal_value"]);
+  const sugars_100g = toNumber(nutriments["sugars_100g"]);
+  const salt_100g = toNumber(nutriments["salt_100g"]);
+
+  const healthy_score = computeHealthyScore(nutriscore, sugars_100g, salt_100g);
+
+  return {
+    raw_id: rawId,
+    status: "success",
+    enriched_at: new Date().toISOString(),
+    data: {
+      product_name,
+      brand,
+      category,
+      nutriscore,
+      energy_kcal_100g,
+      sugars_100g,
+      salt_100g,
+      healthy_score,
+      image_url,
+    },
+  };
+}
+
+async function runEnrichment() {
   const client = new MongoClient(MONGO_URI);
   await client.connect();
   const db = client.db(DB_NAME);
@@ -52,36 +87,7 @@ function computeHealthyScore(nutri, sugars, salt) {
     if (exists) continue;
 
     try {
-      const p = rawDoc.payload || {};
-
-      const product_name = p.product_name || p.generic_name || "Unknown";
-      const brand = (p.brands || "").split(",")[0]?.trim() || "Unknown";
-      const category = (p.categories_tags && p.categories_tags[0]) || (p.categories || "Unknown");
-      const nutriscore = p.nutriscore_grade ? String(p.nutriscore_grade).toUpperCase() : null;
-
-      const nutriments = p.nutriments || {};
-      const energy_kcal_100g =
-        toNumber(nutriments["energy-kcal_100g"] ?? nutriments["energy-kcal_value"]);
-      const sugars_100g = toNumber(nutriments["sugars_100g"]);
-      const salt_100g = toNumber(nutriments["salt_100g"]);
-
-      const healthy_score = computeHealthyScore(nutriscore, sugars_100g, salt_100g);
-
-      const enrichedDoc = {
-        raw_id: rawId,
-        status: "success",
-        enriched_at: new Date().toISOString(),
-        data: {
-          product_name,
-          brand,
-          category,
-          nutriscore,
-          energy_kcal_100g,
-          sugars_100g,
-          salt_100g,
-          healthy_score,
-        },
-      };
+      const enrichedDoc = buildEnrichedDoc(rawDoc);
 
       await enrCol.insertOne(enrichedDoc);
       success++;
@@ -98,4 +104,14 @@ function computeHealthyScore(nutri, sugars, salt) {
 
   console.log("ENRICH DONE:", { success, failed });
   await client.close();
-})();
+}
+
+if (require.main === module) {
+  runEnrichment();
+}
+
+module.exports = {
+  toNumber,
+  computeHealthyScore,
+  buildEnrichedDoc,
+};

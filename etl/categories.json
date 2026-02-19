@@ -1,0 +1,179 @@
+{
+  "categories": [
+    {
+      "id": 1,
+      "name": "Snacks & Grignotages",
+      "icon": "🍟",
+      "subcategories": [
+        "Crackers salés",
+        "Chips salées",
+        "Chips sucrées",
+        "Pop-corn",
+        "Cacahuètes & Fruits secs",
+        "Barres de céréales"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "Confiseries",
+      "icon": "🍫",
+      "subcategories": [
+        "Chocolats",
+        "Bonbons",
+        "Biscuits sucrés",
+        "Pâtes à tartiner",
+        "Barres énergétiques"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "Boissons",
+      "icon": "🥤",
+      "subcategories": [
+        "Sodas",
+        "Jus de fruits",
+        "Eau minérale",
+        "Boissons énergétiques",
+        "Thé glacé"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "Produits Laitiers",
+      "icon": "🥛",
+      "subcategories": [
+        "Fromages",
+        "Yaourts",
+        "Lait",
+        "Crèmes desserts",
+        "Beurre"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "Protéines",
+      "icon": "🥩",
+      "subcategories": [
+        "Viande fraîche",
+        "Poisson",
+        "Charcuterie",
+        "Œufs",
+        "Substituts protéinés"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "Féculents",
+      "icon": "🍝",
+      "subcategories": [
+        "Pâtes",
+        "Riz",
+        "Pain",
+        "Céréales",
+        "Pommes de terre"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "Condiments & Sauces",
+      "icon": "🧈",
+      "subcategories": [
+        "Huiles",
+        "Sauces",
+        "Vinaigrettes",
+        "Épices",
+        "Sel"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "Fruits & Légumes",
+      "icon": "🥗",
+      "subcategories": [
+        "Fruits frais",
+        "Légumes frais",
+        "Fruits surgelés",
+        "Légumes surgelés",
+        "Fruits en conserve"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "Petit-Déjeuner",
+      "icon": "🍞",
+      "subcategories": [
+        "Céréales petit-déj",
+        "Miel",
+        "Confitures",
+        "Pains grillés",
+        "Sirops"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Conserves & Bocaux",
+      "icon": "🥫",
+      "subcategories": [
+        "Légumes en conserve",
+        "Fruits en conserve",
+        "Poisson en conserve",
+        "Viande en conserve",
+        "Soupe"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Produits Surgelés",
+      "icon": "❄️",
+      "subcategories": [
+        "Pizzas surgelées",
+        "Plats préparés",
+        "Légumes surgelés",
+        "Fruits surgelés",
+        "Crèmes glacées"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "Produits Bio & Santé",
+      "icon": "🌱",
+      "subcategories": [
+        "Produits bio",
+        "Produits sans gluten",
+        "Produits allégés",
+        "Barres protéinées",
+        "Suppléments"
+      ]
+    }
+  ],
+  "allergens": [
+    "Gluten",
+    "Œuf",
+    "Arachides",
+    "Fruits à coque",
+    "Crustacés",
+    "Poisson",
+    "Mollusques",
+    "Céleri",
+    "Moutarde",
+    "Graines de sésame",
+    "Dioxyde de soufre",
+    "Lupin",
+    "Lait",
+    "Soja"
+  ],
+  "categoryKeywords": {
+    "Snacks & Grignotages": ["snack", "chip", "cracker", "popcorn", "pop corn", "cacahuète"],
+    "Confiseries": ["bonbon", "chocolat", "biscuit", "sucre", "candy", "bar", "pâte à tartiner"],
+    "Boissons": ["boisson", "soda", "jus", "eau", "drink", "beverage", "cola", "sprite", "fanta"],
+    "Produits Laitiers": ["lait", "yaourt", "fromage", "crème", "butter", "cheese", "dairy"],
+    "Protéines": ["viande", "poisson", "porc", "poulet", "œuf", "charcuterie", "protéine", "meat", "fish"],
+    "Féculents": ["pâte", "riz", "pain", "cereal", "amidon", "rice", "pasta"],
+    "Condiments & Sauces": ["sauce", "huile", "épice", "sel", "vinaigre", "olive", "oil"],
+    "Fruits & Légumes": ["fruit", "légume", "pomme", "orange", "banane", "tomate", "carotte", "vegetable"],
+    "Petit-Déjeuner": ["petit déjeuner", "breakfast", "miel", "confiture", "muesli"],
+    "Conserves & Bocaux": ["conserve", "bocal", "canned", "tin", "pot"],
+    "Produits Surgelés": ["surgelé", "frozen", "glace", "ice cream", "pizza"],
+    "Produits Bio & Santé": ["bio", "organic", "sans gluten", "gluten free", "allégé", "diet", "light"]
+  }
+}

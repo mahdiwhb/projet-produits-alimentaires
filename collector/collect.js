@@ -7,11 +7,14 @@ const DB_NAME = process.env.DB_NAME || "pipeline_db";
 const RAW_COLLECTION = "raw_products";
 
 // On vise 300+ items
-const PAGE_SIZE = 100;
+const PAGE_SIZE = 50;
 const TARGET = 320;
+const FETCH_TIMEOUT_MS = 30000;
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1500;
 
 // OpenFoodFacts search endpoint
-// On prend une catégorie simple : "snacks"
+// On prend une categorie simple : "snacks"
 function buildUrl(page) {
   const base = "https://world.openfoodfacts.org/cgi/search.pl";
   const params = new URLSearchParams({
@@ -31,7 +34,23 @@ function sha256(str) {
   return crypto.createHash("sha256").update(str).digest("hex");
 }
 
-(async () => {
+function makeRawDoc(payload) {
+  const baseStr =
+    JSON.stringify({
+      code: payload.code || null,
+      _id: payload._id || null,
+      product_name: payload.product_name || null,
+    }) + JSON.stringify(payload);
+
+  return {
+    source: "openfoodfacts",
+    fetched_at: new Date().toISOString(),
+    raw_hash: sha256(baseStr),
+    payload,
+  };
+}
+
+async function runCollector() {
   const client = new MongoClient(MONGO_URI);
   await client.connect();
   const db = client.db(DB_NAME);
@@ -48,11 +67,22 @@ function sha256(str) {
     console.log("Fetch:", url);
 
     let data;
-    try {
-      const res = await axios.get(url, { timeout: 15000 });
-      data = res.data;
-    } catch (err) {
-      console.error("Fetch error:", err.message);
+    let ok = false;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const res = await axios.get(url, { timeout: FETCH_TIMEOUT_MS });
+        data = res.data;
+        ok = true;
+        break;
+      } catch (err) {
+        console.error(`Fetch error (attempt ${attempt}/${MAX_RETRIES}):`, err.message);
+        if (attempt < MAX_RETRIES) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        }
+      }
+    }
+
+    if (!ok) {
       page++;
       continue;
     }
@@ -74,12 +104,7 @@ function sha256(str) {
         product_name: payload.product_name || null,
       }) + JSON.stringify(payload);
 
-      const doc = {
-        source: "openfoodfacts",
-        fetched_at: new Date().toISOString(),
-        raw_hash: sha256(baseStr),
-        payload,
-      };
+      const doc = makeRawDoc(payload);
 
       try {
         await col.insertOne(doc);
@@ -98,4 +123,16 @@ function sha256(str) {
 
   console.log("DONE. RAW inserted:", inserted);
   await client.close();
-})();
+}
+
+if (require.main === module) {
+  runCollector();
+}
+
+module.exports = {
+  buildUrl,
+  sha256,
+  makeRawDoc,
+  PAGE_SIZE,
+  TARGET,
+};
